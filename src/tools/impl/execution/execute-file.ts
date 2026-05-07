@@ -10,7 +10,7 @@ export default function register(server: McpServer): void {
     {
       title: "Execute a Luau file in the Roblox Game Client",
       description:
-        "Reads a local .luau or .lua file from disk and executes its contents in the Roblox Game Client. This tool does NOT return output - use get-data-by-code if you need to retrieve data.",
+        "Execute a local .luau or .lua file in the active Roblox client without returning output. Use get-data-by-code instead when you need returned values.",
       inputSchema: z.object({
         filePath: z
           .string()

@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Get captured remote spy logs from Cobalt",
       description:
-        "Retrieves captured remote/bindable call logs from the Cobalt remote spy. Returns remote name, class, direction (Incoming/Outgoing), call count, and recent call arguments. Cobalt must be loaded first via ensure-remote-spy.",
+        "List captured Cobalt remote and bindable call logs. Requires ensure-remote-spy first; supports direction and name filters to narrow noisy logs.",
       inputSchema: z.object({
         direction: z
           .enum(["Incoming", "Outgoing", "Both"])

@@ -7,7 +7,8 @@ export default function register(server: McpServer): void {
     "click-button",
     {
       title: "Click a GuiButton",
-      description: "Simulates clicks on a TextButton or ImageButton by firing its signals via firesignal.",
+      description:
+        "Click a Roblox TextButton or ImageButton by firing its GUI signals. Use when direct UI activation is needed inside the active client.",
       inputSchema: z.object({
         path: z.string().describe("The instance path to the Button"),
         action: z

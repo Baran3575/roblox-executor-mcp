@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Ignore or unignore a remote",
       description:
-        "Ignore or unignore a specific remote event/function in the Cobalt remote spy. Ignored remotes will still fire but their calls won't be logged. Cobalt must be loaded first via ensure-remote-spy.",
+        "Ignore or unignore logging for a Roblox remote by exact name and direction. Requires ensure-remote-spy first; ignored remotes still fire.",
       inputSchema: z.object({
         remoteName: z.string().describe("The exact name of the remote to ignore/unignore"),
         direction: z

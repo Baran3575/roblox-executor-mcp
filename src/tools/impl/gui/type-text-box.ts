@@ -7,7 +7,8 @@ export default function register(server: McpServer): void {
     "type-text-box",
     {
       title: "Type into a TextBox",
-      description: "Types text into a TextBox instance, with optional physical key press simulation.",
+      description:
+        "Enter text into a Roblox TextBox by path. Can simulate keystrokes or set Text directly based on useKeyPress.",
       inputSchema: z.object({
         path: z.string().describe("The instance path to the TextBox"),
         text: z.string().describe("The string to type into the TextBox"),

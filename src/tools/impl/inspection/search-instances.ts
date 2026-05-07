@@ -7,31 +7,13 @@ export default function register(server: McpServer): void {
     "search-instances",
     {
       title: "Search for instances in the game",
-      description: `Search for instances in the Roblox game using QueryDescendants with a CSS-like selector syntax. Supports class names (Part), tags (.Tag), names (#Name), properties ([Property = value]), attributes ([$Attribute = value]), combinators (>, >>), and pseudo-classes (:not(), :has()).
-
-SELECTOR SYNTAX:
-- ClassName: Matches instances of a class (uses IsA, so 'BasePart' matches Part, MeshPart, etc.). Example: Part, SpotLight, Model
-- .Tag: Matches instances with a CollectionService tag. Example: .Fruit, .Enemy, .Interactable
-- #Name: Matches instances by their Name property. Example: #HumanoidRootPart, #Head, #Torso
-- [Property = value]: Matches instances where a property equals a value (boolean, number, string). Example: [CanCollide = false], [Transparency = 1], [Name = Folder10]
-- [$Attribute = value]: Matches instances with a specific attribute value. Example: [$Health = 100], [$IsEnemy = true]
-- [$Attribute]: Matches instances that have the attribute set (any value). Example: [$QuestId]
-
-COMBINATORS:
-- > : Direct children only. Example: Model > Part (Parts that are direct children of a Model)
-- >> : All descendants (default). Example: Model >> Part (Parts anywhere inside a Model)
-- , : Multiple selectors (OR). Example: Part, MeshPart (matches either)
-
-PSEUDO-CLASSES:
-- :not(selector): Excludes matches. Example: BasePart:not([CanCollide = true]) - parts with CanCollide false
-- :has(selector): Matches if containing a descendant. Example: Model:has(> Humanoid) - Models with a Humanoid child
-
-COMBINING SELECTORS: Chain selectors for AND logic. Example: Part.Tagged[Anchored = false] - Parts with tag "Tagged" that are unanchored`,
+      description:
+        "Search Roblox instances with QueryDescendants selector syntax. Use for class, name, tag, property, and attribute queries against a chosen root.",
       inputSchema: z.object({
         selector: z
           .string()
           .describe(
-            "The selector string to filter instances (e.g., 'Part', '.Tagged', '#InstanceName', '[CanCollide = false]', 'Model >> Part.Glowing')"
+            "Selector string to filter instances. Supports classes (Part), tags (.Tagged), names (#HumanoidRootPart), properties ([CanCollide = false]), attributes ([$QuestId] or [$Health = 100]), child/descendant combinators (> and >>), OR selectors (,), :not(), and :has(); chain selectors for AND logic, e.g. Part.Tagged[Anchored = false]."
           ),
         root: z
           .string()

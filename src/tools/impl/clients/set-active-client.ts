@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Set active Roblox client",
       description:
-        "Sets the active Roblox client to the provided clientId. Future tool calls will be routed to this client.",
+        "Route future Roblox tool calls to the specified connected client. Use list-clients first if you need available clientIds.",
       inputSchema: z.object({
         clientId: z
           .string()

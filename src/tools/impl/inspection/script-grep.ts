@@ -136,7 +136,7 @@ export default function register(server: McpServer): void {
     {
       title: "Grep across all scripts in the game",
       description:
-        'Search across all decompiled scripts in the game on the MCP server using JavaScript regex syntax. Supports patterns like \\bRemoteEvent\\b, \\w+Service, function\\s+\\w+, lookaheads, alternation (foo|bar), etc. Use the literal flag for plain string matching. IMPORTANT: If a script instance has already been garbage collected, a "<ScriptProxy: DebugId>" string will be returned instead of the script instance path.',
+        "Search decompiled Roblox scripts with JavaScript regex or literal string matching. Use for exact identifiers or code patterns; use semantic-search-scripts when behavior is known but names are not.",
       inputSchema: z.object({
         query: z
           .string()

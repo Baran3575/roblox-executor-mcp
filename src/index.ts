@@ -17,7 +17,7 @@ const server = new McpServer({
   name: "roblox-executor-mcp",
   version: "2.0.0",
   description:
-    "A MCP Server allowing interaction to the Roblox Game Client (including access to restricted APIs such as getgc(), getreg(), etc.) with full control over the game. Dashboard can be found at http://localhost:16384/",
+    "Expose MCP tools for inspecting, executing Luau in, and interacting with connected Roblox game clients. Dashboard: http://localhost:16384/.",
 });
 
 registerAllTools(server);

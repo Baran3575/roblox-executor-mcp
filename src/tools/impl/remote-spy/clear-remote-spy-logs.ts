@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Clear all remote spy logs",
       description:
-        "Clears all captured remote spy logs from Cobalt. This removes all logged calls for every remote. Cobalt must be loaded first via ensure-remote-spy.",
+        "Clear all captured Cobalt remote spy logs. Requires ensure-remote-spy first.",
       inputSchema: z.object({}),
     },
     async () =>

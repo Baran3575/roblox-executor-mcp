@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Get information about the current Roblox game",
       description:
-        "Retrieves basic information about the current game including PlaceId, GameId, PlaceVersion, and other metadata.",
+        "Get current Roblox place and universe metadata such as PlaceId, GameId, and PlaceVersion.",
       inputSchema: z.object({}),
     },
     async () =>

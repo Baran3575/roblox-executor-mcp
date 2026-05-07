@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Get the descendants tree of a Roblox instance",
       description:
-        "Returns a structured hierarchy tree of an instance's descendants, showing names, class types, and nesting. Useful for exploring game structure without writing custom Lua. Results are depth-limited and optionally filtered by class.",
+        "Get a depth-limited hierarchy of descendants under a Roblox instance. Use for broad structure exploration; use search-instances for selector-based filtering.",
       inputSchema: z.object({
         root: z
           .string()

@@ -35,7 +35,8 @@ export default function register(server: McpServer): void {
     "get-script-content",
     {
       title: "Get the content of a script in the Roblox Game Client",
-      description: "Get the content of a script in the Roblox Game Client",
+      description:
+        "Get decompiled source for a Roblox script by path, script proxy, or getter code. Use startLine/endLine for a focused range when the full script is large.",
       inputSchema: z.object({
         scriptGetterSource: z
           .string()

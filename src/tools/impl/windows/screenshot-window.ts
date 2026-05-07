@@ -14,12 +14,7 @@ export default function register(server: McpServer): void {
     {
       title: "Take a screenshot of a Roblox window",
       description:
-        "Captures a screenshot of the Roblox game window using the Windows API (PrintWindow/GDI). " +
-        "Does NOT use any Lua/Roblox API — it captures the actual OS window contents. " +
-        "If multiple Roblox windows are open, specify the pid to target a specific one. " +
-        "Only works on Windows. " +
-        "If the MCP server is running as a secondary (with BASE_URL set), the screenshot request is relayed to the primary server — " +
-        "so the primary's machine (which may be a remote Windows host) performs the actual capture, even if roblox isn't running on the machine the MCP client is on.",
+        "Capture an actual OS screenshot of a Roblox window via Windows APIs. Provide pid when multiple windows are open; secondary servers relay capture to the primary host.",
       inputSchema: z.object({
         pid: z
           .number()

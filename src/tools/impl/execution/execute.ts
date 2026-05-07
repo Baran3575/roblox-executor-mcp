@@ -8,6 +8,8 @@ export default function register(server: McpServer): void {
     "execute",
     {
       title: "Execute Code in the Roblox Game Client",
+      description:
+        "Execute Luau in the active Roblox client without returning output. Use get-data-by-code instead when you need returned values.",
       inputSchema: z.object({
         code: z
           .string()

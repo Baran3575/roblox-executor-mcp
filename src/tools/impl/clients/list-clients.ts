@@ -15,7 +15,7 @@ export default function register(server: McpServer): void {
     {
       title: "List connected Roblox clients",
       description:
-        "Returns a list of all Roblox game clients currently connected to the MCP bridge, including their clientId, username, placeId, jobId, and placeName. Use the clientId from this list to target specific clients in other tools.",
+        "List connected Roblox game clients with clientId and session metadata. Use before set-active-client when multiple clients are connected or the target client is unknown.",
     },
     async () => {
       if (getInstanceRole() === "secondary") {

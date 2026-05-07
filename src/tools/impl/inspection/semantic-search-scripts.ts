@@ -55,7 +55,7 @@ export default function register(server: McpServer): void {
     {
       title: "Semantically search scripts in the game",
       description:
-        "Search across decompiled script sources using semantic embeddings configured from the Roblox MCP dashboard. Use this for intent-based searches like finding inventory logic, teleport handlers, quest state, cooldown checks, or remote validation even when exact identifiers are unknown.",
+        "Find decompiled Roblox scripts by behavior using semantic embeddings. Use when exact identifiers are unknown; use script-grep for exact text or regex.",
       inputSchema: z.object({
         query: z
           .string()

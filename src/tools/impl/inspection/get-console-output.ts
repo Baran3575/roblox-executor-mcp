@@ -7,6 +7,8 @@ export default function register(server: McpServer): void {
     "get-console-output",
     {
       title: "Get the roblox developer console output from the Roblox Game Client",
+      description:
+        "Read recent Roblox developer console logs from the active client. Use limit and logsOrder to control volume and ordering.",
       inputSchema: z.object({
         limit: z
           .number()

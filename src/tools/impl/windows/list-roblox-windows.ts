@@ -14,8 +14,7 @@ export default function register(server: McpServer): void {
     {
       title: "List visible Roblox windows",
       description:
-        "Returns all visible Roblox game windows and their PIDs. Useful for disambiguating which PID to pass to the screenshot-window tool when multiple instances of Roblox are running. " +
-        "If the MCP server is running as a secondary (with BASE_URL set), the request is relayed to the primary server.",
+        "List visible Roblox OS windows with PIDs. Use before screenshot-window when multiple Roblox windows may be open.",
       inputSchema: z.object({}),
     },
     async () => {

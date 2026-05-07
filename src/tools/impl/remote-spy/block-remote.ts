@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Block or unblock a remote",
       description:
-        "Block or unblock a specific remote event/function in the Cobalt remote spy. Blocked remotes will have their calls prevented from reaching the server/client. Cobalt must be loaded first via ensure-remote-spy.",
+        "Block or unblock a Roblox remote by exact name and direction. Requires ensure-remote-spy first; use get-remote-spy-logs to discover candidates.",
       inputSchema: z.object({
         remoteName: z.string().describe("The exact name of the remote to block/unblock"),
         direction: z

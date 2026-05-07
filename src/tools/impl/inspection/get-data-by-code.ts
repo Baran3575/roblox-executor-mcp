@@ -9,7 +9,7 @@ export default function register(server: McpServer): void {
     {
       title: "Get data by code",
       description:
-        "Query data from the Roblox Game Client by executing code, note that the code MUST return one or more values. IMPORTANT: Do NOT serialize/encode the return value yourself (no HttpService:JSONEncode, no custom table-to-string) - just return raw Lua values directly. The connector automatically serializes all returned data.",
+        "Execute Luau in the active Roblox client and return serialized raw Lua values. The code must return values; do not manually JSON-encode them.",
       inputSchema: z.object({
         code: z
           .string()

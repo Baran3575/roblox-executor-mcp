@@ -8,7 +8,7 @@ export default function register(server: McpServer): void {
     {
       title: "Ensure the Cobalt remote spy is loaded",
       description:
-        "Loads the Cobalt remote spy if it is not already running. Cobalt hooks all RemoteEvents, RemoteFunctions, BindableEvents, BindableFunctions (both incoming and outgoing, including Actors) and logs their calls. Must be called before using get-remote-spy-logs. Returns the current status of Cobalt.",
+        "Load or verify the Cobalt remote spy in the active Roblox client. Call before reading, clearing, blocking, or ignoring remote spy logs.",
       inputSchema: z.object({}),
     },
     async () =>

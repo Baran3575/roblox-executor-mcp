@@ -13,7 +13,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.mjs",
+    "build": "node scripts/clean-dist.mjs && tsc && node scripts/copy-assets.mjs",
     "install:harness": "node scripts/install-harnesses.mjs",
     "install:harnesses": "node scripts/install-harnesses.mjs",
     "start": "node dist/index.js",
