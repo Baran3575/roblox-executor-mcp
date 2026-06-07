@@ -139,7 +139,10 @@ async function main() {
     console.log(JSON.stringify({ mcpServers: { [SERVER_NAME]: mcpServerConfig(serverEntry) } }, null, 2));
   }
 
-  console.log(`\n${colors.green}Done.${colors.reset} Restart selected clients, then connect Roblox with:`);
+  const restartList = selectedHarnesses.length > 0
+    ? selectedHarnesses.map((h) => h.name).join(", ")
+    : "selected clients";
+  console.log(`\n${colors.green}Done.${colors.reset} Restart ${restartList}, then connect Roblox with:`);
   const loaderSnippet = buildLoaderSnippet(crossMachine?.bridgeUrl);
   console.log(`${colors.cyan}${loaderSnippet}${colors.reset}`);
   if (crossMachine) {
