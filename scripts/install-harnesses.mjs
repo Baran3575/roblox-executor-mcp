@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-const SERVER_NAME = "roblox-executor-mcp";
+const DEFAULT_SERVER_NAME = "roblox-mcp";
+const SERVER_NAME = normalizeServerName(getArgValue("--server-name") || process.env.ROBLOX_MCP_SERVER_NAME || DEFAULT_SERVER_NAME);
 const CURRENT_REPO_DIR = process.cwd();
 const DEFAULT_BRIDGE_URL = "localhost:16384";
 const SERVER_PORT = 16384;
@@ -166,7 +167,7 @@ async function runGetScriptMode() {
   const bridgeUrl =
     bridgeArgIndex !== -1 && process.argv[bridgeArgIndex + 1]
       ? normalizeBridgeUrl(process.argv[bridgeArgIndex + 1])
-      : DEFAULT_BRIDGE_URL;
+      : await promptForGetScriptBridgeUrl();
   const loaderSnippet = buildLoaderSnippet(bridgeUrl);
   console.log(loaderSnippet);
   const copied = await copyToClipboard(loaderSnippet).catch((error) => {
@@ -174,6 +175,19 @@ async function runGetScriptMode() {
     return false;
   });
   if (copied) log("ok", "Roblox loader copied to clipboard");
+  showCursor();
+}
+
+async function promptForGetScriptBridgeUrl() {
+  if (NON_INTERACTIVE) return DEFAULT_BRIDGE_URL;
+
+  const shouldUseLan = await askYesNo("Use local machine IP instead of localhost", false);
+  if (!shouldUseLan) return DEFAULT_BRIDGE_URL;
+
+  const detectedIp = getLocalLanIp();
+  const fallbackIp = detectedIp || "127.0.0.1";
+  const ip = await askInput("Local machine IP for Roblox to reach", fallbackIp);
+  return normalizeBridgeUrl(ip);
 }
 
 async function runUpdateMode() {
@@ -578,16 +592,16 @@ async function configureHarness(harness, serverEntry, results) {
 
 async function configureClaudeCode(serverEntry) {
   if (!commandExists("claude")) {
-    throw new Error("Claude Code CLI not found. Run manually: claude mcp add --global roblox-executor-mcp -- node " + quote(serverEntry));
+    throw new Error("Claude Code CLI not found. Run manually: claude mcp add --global " + SERVER_NAME + " -- node " + mcpServerArgs(serverEntry).map(quote).join(" "));
   }
-  await run("claude", ["mcp", "add", "--global", SERVER_NAME, "--", "node", serverEntry], { label: "Adding Claude Code MCP server" });
+  await run("claude", ["mcp", "add", "--global", SERVER_NAME, "--", "node", ...mcpServerArgs(serverEntry)], { label: "Adding Claude Code MCP server" });
 }
 
 async function configureVsCodeCopilot(serverEntry) {
   const payload = JSON.stringify({
     name: SERVER_NAME,
     command: "node",
-    args: [serverEntry],
+    args: mcpServerArgs(serverEntry),
   });
   if (!commandExists("code")) {
     throw new Error(`VS Code CLI not found. Run manually: code --add-mcp ${quote(payload)}`);
@@ -607,7 +621,7 @@ async function writeOpencodeJson(filePath, serverEntry) {
   json.mcp = json.mcp && typeof json.mcp === "object" ? json.mcp : {};
   json.mcp[SERVER_NAME] = {
     type: "local",
-    command: ["node", serverEntry],
+    command: ["node", ...mcpServerArgs(serverEntry)],
     enabled: true,
   };
   await writeJson(filePath, json);
@@ -618,7 +632,7 @@ async function writeKiloJson(filePath, serverEntry) {
   json.mcp = json.mcp && typeof json.mcp === "object" ? json.mcp : {};
   json.mcp[SERVER_NAME] = {
     type: "local",
-    command: ["node", serverEntry],
+    command: ["node", ...mcpServerArgs(serverEntry)],
     enabled: true,
   };
   await writeJson(filePath, json);
@@ -636,7 +650,7 @@ async function writeAmpJson(filePath, serverEntry) {
 
 async function writeCodexToml(filePath, serverEntry) {
   let text = exists(filePath) ? await fs.readFile(filePath, "utf8") : "";
-  const block = `[mcp_servers.${SERVER_NAME}]\ncommand = "node"\nargs = ["${tomlString(serverEntry)}"]\n`;
+  const block = `[mcp_servers.${SERVER_NAME}]\ncommand = "node"\nargs = [${tomlArgs(serverEntry)}]\n`;
   const escapedName = SERVER_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`\\n?\\[mcp_servers\\.${escapedName}\\]\\n(?:[^\\[]|\\[(?!mcp_servers\\.))*`, "m");
   text = text.replace(re, "\n");
@@ -646,22 +660,22 @@ async function writeCodexToml(filePath, serverEntry) {
 }
 
 async function writeContinueYaml(filePath, serverEntry) {
-  const markerStart = "# roblox-executor-mcp:start";
-  const markerEnd = "# roblox-executor-mcp:end";
-  const block = `${markerStart}\nmcpServers:\n  - name: ${SERVER_NAME}\n    command: node\n    args:\n      - ${yamlString(serverEntry)}\n${markerEnd}\n`;
+  const markerStart = `# ${SERVER_NAME}:start`;
+  const markerEnd = `# ${SERVER_NAME}:end`;
+  const block = `${markerStart}\nmcpServers:\n  - name: ${SERVER_NAME}\n    command: node\n    args:\n${yamlArgs(serverEntry)}${markerEnd}\n`;
   let text = exists(filePath) ? await fs.readFile(filePath, "utf8") : "";
-  const re = new RegExp(`${escapeRe(markerStart)}[\\s\\S]*?${escapeRe(markerEnd)}\\n?`, "m");
+  const re = mcpMarkerRegex(SERVER_NAME);
   if (re.test(text)) text = text.replace(re, block);
   else text = `${text.trimEnd()}${text.trimEnd() ? "\n\n" : ""}${block}`;
   await writeText(filePath, text);
 }
 
 async function writeGooseYaml(filePath, serverEntry) {
-  const markerStart = "# roblox-executor-mcp:start";
-  const markerEnd = "# roblox-executor-mcp:end";
-  const block = `${markerStart}\nextensions:\n  ${SERVER_NAME}:\n    command: node\n    args:\n      - ${yamlString(serverEntry)}\n    enabled: true\n    type: stdio\n${markerEnd}\n`;
+  const markerStart = `# ${SERVER_NAME}:start`;
+  const markerEnd = `# ${SERVER_NAME}:end`;
+  const block = `${markerStart}\nextensions:\n  ${SERVER_NAME}:\n    command: node\n    args:\n${yamlArgs(serverEntry)}    enabled: true\n    type: stdio\n${markerEnd}\n`;
   let text = exists(filePath) ? await fs.readFile(filePath, "utf8") : "";
-  const re = new RegExp(`${escapeRe(markerStart)}[\\s\\S]*?${escapeRe(markerEnd)}\\n?`, "m");
+  const re = mcpMarkerRegex(SERVER_NAME);
   if (re.test(text)) text = text.replace(re, block);
   else text = `${text.trimEnd()}${text.trimEnd() ? "\n\n" : ""}${block}`;
   await writeText(filePath, text);
@@ -669,7 +683,7 @@ async function writeGooseYaml(filePath, serverEntry) {
 
 async function writeVibeToml(filePath, serverEntry) {
   let text = exists(filePath) ? await fs.readFile(filePath, "utf8") : "";
-  const block = `[[mcp_servers]]\nname = "${SERVER_NAME}"\ntransport = "stdio"\ncommand = "node"\nargs = ["${tomlString(serverEntry)}"]\n`;
+  const block = `[[mcp_servers]]\nname = "${SERVER_NAME}"\ntransport = "stdio"\ncommand = "node"\nargs = [${tomlArgs(serverEntry)}]\n`;
   const re = new RegExp(`\\n?\\[\\[mcp_servers\\]\\]\\nname = "${escapeRe(SERVER_NAME)}"\\n(?:[^\\[]|\\[(?!\\[mcp_servers\\]\\]))*`, "m");
   text = text.replace(re, "\n");
   text = text.trimEnd();
@@ -678,7 +692,24 @@ async function writeVibeToml(filePath, serverEntry) {
 }
 
 function mcpServerConfig(serverEntry) {
-  return { command: "node", args: [serverEntry] };
+  return { command: "node", args: mcpServerArgs(serverEntry) };
+}
+
+function mcpServerArgs(serverEntry) {
+  return [serverEntry, "--server-name", SERVER_NAME];
+}
+
+function tomlArgs(serverEntry) {
+  return mcpServerArgs(serverEntry).map((arg) => `"${tomlString(arg)}"`).join(", ");
+}
+
+function yamlArgs(serverEntry) {
+  return mcpServerArgs(serverEntry).map((arg) => `      - ${yamlString(arg)}\n`).join("");
+}
+
+function mcpMarkerRegex(serverName) {
+  const names = [serverName, "roblox-executor-mcp"].map(escapeRe).join("|");
+  return new RegExp(`# (?:${names}):start[\\s\\S]*?# (?:${names}):end\\n?`, "m");
 }
 
 async function run(command, args, options = {}) {
@@ -1028,6 +1059,19 @@ function spawnCommand(command) {
   if (command.endsWith(".cmd") || command.endsWith(".exe")) return command;
   if (["npm", "pnpm", "yarn", "code", "claude"].includes(command)) return `${command}.cmd`;
   return command;
+}
+
+function getArgValue(flag) {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return null;
+  const value = process.argv[index + 1];
+  return value && !value.startsWith("--") ? value : null;
+}
+
+function normalizeServerName(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return DEFAULT_SERVER_NAME;
+  return trimmed;
 }
 
 function homePath(...parts) {

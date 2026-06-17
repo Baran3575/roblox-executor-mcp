@@ -10,11 +10,11 @@ import { installServerLogCapture } from "./http/server-logs.js";
 // Install log capture early so all console.error calls are buffered.
 installServerLogCapture();
 
-// Import config for its side effects (CLI arg parsing + logging).
-import "./config.js";
+// Import config for CLI arg parsing and startup logging.
+import { SERVER_NAME } from "./config.js";
 
 const server = new McpServer({
-  name: "roblox-executor-mcp",
+  name: SERVER_NAME,
   version: "2.0.0",
   description:
     "Expose MCP tools for inspecting, executing Luau in, and interacting with connected Roblox game clients. Dashboard: http://localhost:16384/.",
