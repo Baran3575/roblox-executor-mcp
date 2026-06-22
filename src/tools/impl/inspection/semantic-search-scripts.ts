@@ -38,9 +38,13 @@ function formatSemanticResults(
     parts.push(
       results
         .map((result, index) => {
+          const signals = result.features.length > 0
+            ? `\nSignals: ${result.features.join(", ")}`
+            : "";
           return (
             `${index + 1}. [${result.path}] lines ${result.startLine}-${result.endLine} ` +
-            `(score ${result.score.toFixed(4)})\n\n${result.snippet}`
+            `(${result.chunkType}: ${result.label}; hybrid ${result.score.toFixed(4)}, dense ${result.denseScore.toFixed(4)}, lexical ${result.lexicalScore.toFixed(4)})\n` +
+            `Summary: ${result.summary}${signals}\n\n${result.snippet}`
           );
         })
         .join("\n\n---\n\n")
@@ -56,7 +60,7 @@ export default function register(server: McpServer): void {
     {
       title: "Semantically search scripts in the game",
       description:
-        "Find decompiled Roblox scripts by behavior using semantic embeddings. Use when exact identifiers are unknown; use script-grep for exact text or regex.",
+        "Find decompiled Roblox scripts by behavior using enriched semantic cards plus exact lexical signals. Use when exact identifiers are unknown; use script-grep for precise text or regex.",
       inputSchema: z.object({
         query: z
           .string()
@@ -68,7 +72,7 @@ export default function register(server: McpServer): void {
           .default(5),
         minScore: z
           .number()
-          .describe("Optional minimum cosine similarity score. Typical useful values are 0.2-0.5.")
+          .describe("Optional minimum dense cosine score. Hybrid lexical matches may still be useful when exact remotes, strings, or APIs match.")
           .optional(),
         requireFullIndex: z
           .boolean()

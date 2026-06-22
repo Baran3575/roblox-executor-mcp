@@ -103,9 +103,14 @@ function formatSemanticSearchResult(
   const header = `${searchResults.length} match(es) for "${query}" across ${chunkCount} chunks`;
   parts.push(header);
 
-  const body = searchResults.map((r, i) =>
-    `${i + 1}. [${r.path}] lines ${r.startLine}-${r.endLine} (score ${r.score.toFixed(4)})\n\n${r.snippet}`
-  ).join("\n\n---\n\n");
+  const body = searchResults.map((r, i) => {
+    const signals = r.features.length > 0 ? `\nSignals: ${r.features.join(", ")}` : "";
+    return (
+      `${i + 1}. [${r.path}] lines ${r.startLine}-${r.endLine} ` +
+      `(${r.chunkType}: ${r.label}; hybrid ${r.score.toFixed(4)}, dense ${r.denseScore.toFixed(4)}, lexical ${r.lexicalScore.toFixed(4)})\n` +
+      `Summary: ${r.summary}${signals}\n\n${r.snippet}`
+    );
+  }).join("\n\n---\n\n");
 
   if (body) parts.push(body);
 

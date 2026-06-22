@@ -3,15 +3,22 @@ import {
   readPersistedEmbedding,
   writePersistedEmbeddings,
 } from "./embedding-cache.js";
+import {
+  buildSemanticChunkTemplates,
+  expandQueryTokens,
+  SEMANTIC_DOCUMENT_VERSION,
+  tokenizeForSearch,
+} from "./code-enrichment.js";
 import { embedTexts } from "./embeddings.js";
 import type { SemanticSettings } from "./settings.js";
 import { getSemanticProviderModel } from "./settings.js";
 
-const CHUNK_LINES = 80;
-const CHUNK_OVERLAP_LINES = 20;
-const CHUNKING_VERSION = "lines-80-overlap-20-v1";
+const CHUNKING_VERSION = SEMANTIC_DOCUMENT_VERSION;
 const OPENAI_EMBEDDING_BATCH_SIZE = 64;
 const OLLAMA_EMBEDDING_BATCH_SIZE = 8;
+const RRF_K = 60;
+const MAX_RESULTS_PER_SCRIPT = 2;
+const RESULT_OVERLAP_THRESHOLD = 0.5;
 
 export interface SemanticSearchResult {
   path: string;
@@ -19,6 +26,12 @@ export interface SemanticSearchResult {
   startLine: number;
   endLine: number;
   score: number;
+  denseScore: number;
+  lexicalScore: number;
+  chunkType: string;
+  label: string;
+  summary: string;
+  features: string[];
   snippet: string;
 }
 
@@ -36,6 +49,12 @@ interface ScriptChunk {
   startLine: number;
   endLine: number;
   body: string;
+  semanticText: string;
+  lexicalText: string;
+  chunkType: string;
+  label: string;
+  summary: string;
+  features: string[];
 }
 
 interface SourceChunkTemplate {
@@ -43,6 +62,12 @@ interface SourceChunkTemplate {
   startLine: number;
   endLine: number;
   body: string;
+  semanticText: string;
+  lexicalText: string;
+  chunkType: string;
+  label: string;
+  summary: string;
+  features: string[];
 }
 
 interface SemanticVectorSession {
@@ -69,32 +94,12 @@ function chunkId(script: StoredScriptSource, startLine: number, endLine: number)
 }
 
 function chunkTemplatesForSource(script: StoredScriptSource): SourceChunkTemplate[] {
-  const cached = sourceChunkTemplatesByHash.get(script.sourceHash);
+  const cacheKey = `${script.sourceHash}:${script.path}`;
+  const cached = sourceChunkTemplatesByHash.get(cacheKey);
   if (cached) return cached;
 
-  const lines = script.source.split(/\r?\n/);
-  const chunks: SourceChunkTemplate[] = [];
-
-  for (let startIndex = 0; startIndex < lines.length; ) {
-    const endIndex = Math.min(lines.length, startIndex + CHUNK_LINES);
-    const startLine = startIndex + 1;
-    const endLine = endIndex;
-    const body = lines.slice(startIndex, endIndex).join("\n").trim();
-
-    if (body) {
-      chunks.push({
-        embeddingId: [script.sourceHash, startLine, endLine].join(":"),
-        startLine,
-        endLine,
-        body,
-      });
-    }
-
-    if (endIndex >= lines.length) break;
-    startIndex = Math.max(endIndex - CHUNK_OVERLAP_LINES, startIndex + 1);
-  }
-
-  sourceChunkTemplatesByHash.set(script.sourceHash, chunks);
+  const chunks = buildSemanticChunkTemplates(script);
+  sourceChunkTemplatesByHash.set(cacheKey, chunks);
   return chunks;
 }
 
@@ -107,6 +112,12 @@ function chunkScript(script: StoredScriptSource): ScriptChunk[] {
     startLine: chunk.startLine,
     endLine: chunk.endLine,
     body: chunk.body,
+    semanticText: chunk.semanticText,
+    lexicalText: chunk.lexicalText,
+    chunkType: chunk.chunkType,
+    label: chunk.label,
+    summary: chunk.summary,
+    features: chunk.features,
   }));
 }
 
@@ -211,19 +222,134 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(aMagnitude) * Math.sqrt(bMagnitude));
 }
 
-const SNIPPET_MAX_LINES = 10;
+const SNIPPET_MAX_LINES = 12;
 
-function formatSnippet(chunk: ScriptChunk): string {
+function formatSnippet(chunk: ScriptChunk, queryTokens: string[]): string {
   const lines = chunk.body.split("\n");
-  const snippetLines = lines.slice(0, SNIPPET_MAX_LINES).map((line, index) => {
-    return `${chunk.startLine + index}: ${line}`;
+  const uniqueQueryTokens = [...new Set(queryTokens)];
+  let bestIndex = 0;
+  let bestScore = 0;
+
+  lines.forEach((line, index) => {
+    const lineTokens = new Set(tokenizeForSearch(line));
+    let score = 0;
+    for (const token of uniqueQueryTokens) {
+      if (lineTokens.has(token)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
   });
 
-  if (lines.length > snippetLines.length) {
-    snippetLines.push("...");
-  }
+  const startIndex =
+    lines.length <= SNIPPET_MAX_LINES || bestScore === 0
+      ? 0
+      : Math.max(0, Math.min(bestIndex - Math.floor(SNIPPET_MAX_LINES / 2), lines.length - SNIPPET_MAX_LINES));
+  const endIndex = Math.min(lines.length, startIndex + SNIPPET_MAX_LINES);
+  const snippetLines = lines.slice(startIndex, endIndex).map((line, index) => {
+    return `${chunk.startLine + startIndex + index}: ${line}`;
+  });
+
+  if (startIndex > 0) snippetLines.unshift("...");
+  if (endIndex < lines.length) snippetLines.push("...");
 
   return snippetLines.join("\n");
+}
+
+interface LexicalDocument {
+  chunk: ScriptChunk;
+  tokenCounts: Map<string, number>;
+  length: number;
+}
+
+function tokenCountsForText(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const token of tokenizeForSearch(text)) {
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function scoreLexicalChunks(chunks: ScriptChunk[], queryTokens: string[]): Map<string, number> {
+  const uniqueQueryTokens = [...new Set(queryTokens)];
+  const scores = new Map<string, number>();
+  if (chunks.length === 0 || uniqueQueryTokens.length === 0) return scores;
+
+  const documents: LexicalDocument[] = chunks.map((chunk) => {
+    const tokenCounts = tokenCountsForText(chunk.lexicalText);
+    let length = 0;
+    for (const count of tokenCounts.values()) length += count;
+    return { chunk, tokenCounts, length };
+  });
+  const averageLength =
+    documents.reduce((sum, doc) => sum + doc.length, 0) / Math.max(1, documents.length);
+  const documentFrequency = new Map<string, number>();
+
+  for (const token of uniqueQueryTokens) {
+    let count = 0;
+    for (const doc of documents) {
+      if (doc.tokenCounts.has(token)) count += 1;
+    }
+    documentFrequency.set(token, count);
+  }
+
+  const k1 = 1.2;
+  const b = 0.75;
+  const n = documents.length;
+
+  for (const doc of documents) {
+    let score = 0;
+    for (const token of uniqueQueryTokens) {
+      const tf = doc.tokenCounts.get(token) ?? 0;
+      if (tf === 0) continue;
+
+      const df = documentFrequency.get(token) ?? 0;
+      const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5));
+      const denominator = tf + k1 * (1 - b + b * (doc.length / Math.max(1, averageLength)));
+      score += idf * ((tf * (k1 + 1)) / denominator);
+    }
+
+    if (score > 0) scores.set(doc.chunk.id, score);
+  }
+
+  return scores;
+}
+
+function ranksById(ids: string[]): Map<string, number> {
+  const ranks = new Map<string, number>();
+  ids.forEach((id, index) => ranks.set(id, index + 1));
+  return ranks;
+}
+
+function overlapRatio(a: SemanticSearchResult, b: SemanticSearchResult): number {
+  if (a.debugId !== b.debugId) return 0;
+  const start = Math.max(a.startLine, b.startLine);
+  const end = Math.min(a.endLine, b.endLine);
+  if (end < start) return 0;
+  const overlap = end - start + 1;
+  const aLength = a.endLine - a.startLine + 1;
+  const bLength = b.endLine - b.startLine + 1;
+  return overlap / Math.max(1, Math.min(aLength, bLength));
+}
+
+function diversifyResults(results: SemanticSearchResult[], limit: number): SemanticSearchResult[] {
+  const selected: SemanticSearchResult[] = [];
+  const perScript = new Map<string, number>();
+
+  for (const result of results) {
+    const scriptCount = perScript.get(result.debugId) ?? 0;
+    if (scriptCount >= MAX_RESULTS_PER_SCRIPT) continue;
+    if (selected.some((existing) => overlapRatio(existing, result) >= RESULT_OVERLAP_THRESHOLD)) {
+      continue;
+    }
+
+    selected.push(result);
+    perScript.set(result.debugId, scriptCount + 1);
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
 }
 
 async function embedMissingChunks(
@@ -286,7 +412,7 @@ async function embedMissingChunks(
     const batch = toEmbed.slice(i, i + batchSize);
     const embeddingPromise = embedTexts(
       settings,
-      batch.map((chunk) => chunk.body)
+      batch.map((chunk) => chunk.semanticText)
     );
 
     for (let j = 0; j < batch.length; j += 1) {
@@ -415,7 +541,8 @@ export async function semanticSearchScripts(
     total: chunks.length + 1,
   });
 
-  const [queryEmbedding] = await embedTexts(settings, [query]);
+  const queryTokens = expandQueryTokens(query);
+  const [queryEmbedding] = await embedTexts(settings, [`Roblox Luau code search query: ${query}`]);
   if (!queryEmbedding) throw new Error("Embedding provider returned no query vector.");
 
   onProgress?.({
@@ -424,29 +551,66 @@ export async function semanticSearchScripts(
     total: chunks.length + 1,
   });
 
-  const scored: SemanticSearchResult[] = [];
+  const chunkById = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+  const denseScores = new Map<string, number>();
+  const lexicalScores = scoreLexicalChunks(chunks, queryTokens);
   const finalEmbeddedCount = countEmbeddedChunkAliases(session, chunks);
 
   for (const chunk of chunks) {
     const embedding = session.vectors.get(chunk.embeddingId);
     if (!embedding) continue;
 
-    const score = cosineSimilarity(queryEmbedding, embedding);
-    if (minScore !== undefined && score < minScore) continue;
+    denseScores.set(chunk.id, cosineSimilarity(queryEmbedding, embedding));
+  }
+
+  const denseRankedIds = [...denseScores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+  const lexicalRankedIds = [...lexicalScores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+  const denseRanks = ranksById(denseRankedIds);
+  const lexicalRanks = ranksById(lexicalRankedIds);
+  const candidateIds = new Set([...denseRankedIds, ...lexicalRankedIds]);
+  const scored: SemanticSearchResult[] = [];
+
+  for (const id of candidateIds) {
+    const chunk = chunkById.get(id);
+    if (!chunk) continue;
+
+    const denseScore = denseScores.get(id) ?? 0;
+    const lexicalScore = lexicalScores.get(id) ?? 0;
+    if (minScore !== undefined && denseScore < minScore && lexicalScore <= 0) continue;
+
+    const denseRank = denseRanks.get(id);
+    const lexicalRank = lexicalRanks.get(id);
+    const hybridScore =
+      (denseRank === undefined ? 0 : 1 / (RRF_K + denseRank)) +
+      (lexicalRank === undefined ? 0 : 1 / (RRF_K + lexicalRank));
 
     scored.push({
       path: chunk.path,
       debugId: chunk.debugId,
       startLine: chunk.startLine,
       endLine: chunk.endLine,
-      score,
-      snippet: formatSnippet(chunk),
+      score: hybridScore,
+      denseScore,
+      lexicalScore,
+      chunkType: chunk.chunkType,
+      label: chunk.label,
+      summary: chunk.summary,
+      features: chunk.features.slice(0, 12),
+      snippet: formatSnippet(chunk, queryTokens),
     });
   }
 
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) =>
+    b.score - a.score ||
+    b.denseScore - a.denseScore ||
+    b.lexicalScore - a.lexicalScore
+  );
   return {
-    results: scored.slice(0, Math.max(0, Math.floor(limit))),
+    results: diversifyResults(scored, Math.max(0, Math.floor(limit))),
     chunkCount: chunks.length,
     embeddedChunks: finalEmbeddedCount,
     isPartialIndex: finalEmbeddedCount < chunks.length,
