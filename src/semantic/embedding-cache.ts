@@ -103,6 +103,12 @@ export async function flushEmbeddingCache(): Promise<void> {
   if (writePromise) {
     needsWrite = true;
     await writePromise;
+    // After the promise resolves, scheduleWrite's .then() may have already
+    // consumed needsWrite. Re-check and flush directly if still pending.
+    if (needsWrite) {
+      needsWrite = false;
+      await writeCache();
+    }
   } else if (needsWrite) {
     needsWrite = false;
     await writeCache();

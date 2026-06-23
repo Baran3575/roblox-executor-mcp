@@ -1520,6 +1520,9 @@ while true do
         SurfaceLight = {
             "Angle", "Face"
         },
+        PointLight = {
+            "Angle"
+        },
         Sound = {
             "SoundId", "Playing", "Looped", "Volume", "PlaybackSpeed", "TimePosition"
         },
@@ -1600,6 +1603,11 @@ while true do
                     propertiesSet[prop] = true
                 end
             end
+            if instance:IsA("PointLight") then
+                for _, prop in classProperties.PointLight do
+                    propertiesSet[prop] = true
+                end
+            end
         end
         if instance:IsA("Sound") then
             for _, prop in classProperties.Sound do
@@ -1631,47 +1639,39 @@ while true do
         local propertiesList = {}
         local propertiesSet = {}
 
-        local getproperties = getproperties or get_properties
-        if typeof(getproperties) == "function" then
-            pcall(function()
-                local props = getproperties(rootInstance)
-                if typeof(props) == "table" then
-                    for _, prop in props do
-                        if typeof(prop) == "string" and not propertiesSet[prop] then
-                            propertiesSet[prop] = true
-                            table.insert(propertiesList, prop)
-                        end
-                    end
-                elseif typeof(props) == "table" then
-                    for prop, _ in props do
-                        if typeof(prop) == "string" and not propertiesSet[prop] then
-                            propertiesSet[prop] = true
-                            table.insert(propertiesList, prop)
-                        end
+        -- Safe global access: avoid error if executor doesn't expose these globals
+        local function collectProps(props)
+            if typeof(props) ~= "table" then return end
+            -- Detect array-style (list of strings) vs dict-style (prop = value)
+            local isArray = typeof(next(props)) == "number"
+            if isArray then
+                for _, prop in props do
+                    if typeof(prop) == "string" and not propertiesSet[prop] then
+                        propertiesSet[prop] = true
+                        table.insert(propertiesList, prop)
                     end
                 end
+            else
+                for prop, _ in props do
+                    if typeof(prop) == "string" and not propertiesSet[prop] then
+                        propertiesSet[prop] = true
+                        table.insert(propertiesList, prop)
+                    end
+                end
+            end
+        end
+
+        local rawGetprops = rawget(getfenv(), "getproperties") or rawget(getfenv(), "get_properties")
+        if typeof(rawGetprops) == "function" then
+            pcall(function()
+                collectProps(rawGetprops(rootInstance))
             end)
         end
 
-        local gethiddenproperties = gethiddenproperties or get_hidden_properties
-        if typeof(gethiddenproperties) == "function" then
+        local rawGetHidden = rawget(getfenv(), "gethiddenproperties") or rawget(getfenv(), "get_hidden_properties")
+        if typeof(rawGetHidden) == "function" then
             pcall(function()
-                local props = gethiddenproperties(rootInstance)
-                if typeof(props) == "table" then
-                    for _, prop in props do
-                        if typeof(prop) == "string" and not propertiesSet[prop] then
-                            propertiesSet[prop] = true
-                            table.insert(propertiesList, prop)
-                        end
-                    end
-                elseif typeof(props) == "table" then
-                    for prop, _ in props do
-                        if typeof(prop) == "string" and not propertiesSet[prop] then
-                            propertiesSet[prop] = true
-                            table.insert(propertiesList, prop)
-                        end
-                    end
-                end
+                collectProps(rawGetHidden(rootInstance))
             end)
         end
 

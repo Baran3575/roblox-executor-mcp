@@ -131,7 +131,7 @@ export function resolveTargetClient(clientId?: string): RobloxClient | null {
 setInterval(() => {
   const now = Date.now();
   for (const [clientId, client] of clientRegistry.entries()) {
-    if (client.transport === "http" && now - client.lastHttpPoll > 60000) {
+    if (client.transport === "http" && now - client.lastHttpPoll > HTTP_POLL_TIMEOUT) {
       unregisterClient(clientId);
     }
   }
