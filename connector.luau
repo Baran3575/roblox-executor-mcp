@@ -1099,6 +1099,13 @@ local function ResetScriptMappingState(clientId)
 
     table.clear(UploadQueue)
     table.clear(UploadQueueDebugIds)
+
+    -- Cancel the upload thread so StartUploadQueue can create a fresh one
+    -- on the next connection. Without this the new client id is never picked up.
+    if UploadQueueThread then
+        pcall(task.cancel, UploadQueueThread)
+        UploadQueueThread = nil
+    end
 end
 
 local function WaitForBridgeClientId(Bridge)
@@ -1302,28 +1309,28 @@ while true do
 
     Bridge:BindToType("search-instances", function(data)
         local rootInstance = safeLoadstring("return " .. data.root, "search-instances")()
-        local instances = rootInstance:QueryDescendants(data.selector)
-        
         local limit = math.max(1, math.min(tonumber(data.limit) or 20, 100))
         local results = {}
-        
-        for i, instance in instances do
-            if i > limit then break end
+        local totalCount = 0
 
-            local fullName = instance.Name
-            pcall(function() fullName = instance:GetFullName() end)
+        for _, instance in rootInstance:QueryDescendants(data.selector) do
+            totalCount += 1
+            if #results < limit then
+                local fullName = instance.Name
+                pcall(function() fullName = instance:GetFullName() end)
 
-            table.insert(results, {
-                Name = instance.Name,
-                ClassName = instance.ClassName,
-                Path = fullName,
-                DebugId = instance:GetDebugId()
-            })
+                table.insert(results, {
+                    Name = instance.Name,
+                    ClassName = instance.ClassName,
+                    Path = fullName,
+                    DebugId = instance:GetDebugId()
+                })
+            end
         end
-        
+
         return {
-            count = #instances,
-            limited = #instances > limit,
+            count = totalCount,
+            limited = totalCount > limit,
             results = results
         }
     end)
@@ -1722,12 +1729,16 @@ while true do
             error("Failed to load Cobalt: " .. tostring(err))
         end
 
-        -- Wait for Cobalt to initialize
+        -- Wait for Cobalt to initialize (it sets getgenv().Cobalt asynchronously)
         local waitStart = os.clock()
         while not getgenv().Cobalt and os.clock() - waitStart < 10 do
             task.wait(0.1)
         end
-        
+
+        if not getgenv().Cobalt then
+            error("Cobalt loaded but failed to initialize within 10 seconds. The remote spy may not be working.")
+        end
+
         return {
             status = "loaded",
             message = "Cobalt remote spy loaded successfully."
