@@ -2,6 +2,7 @@ import type { ScriptSourceIndex, StoredScriptSource } from "../bridge/handlers/s
 import {
   readPersistedEmbedding,
   writePersistedEmbeddings,
+  flushEmbeddingCache,
 } from "./embedding-cache.js";
 import {
   buildSemanticChunkTemplates,
@@ -472,6 +473,10 @@ async function embedMissingChunks(
       total: chunks.length,
     });
   }
+
+  await flushEmbeddingCache().catch((error) => {
+    console.error(`[Semantic] Failed to flush embedding cache: ${String(error)}`);
+  });
 }
 
 export interface SemanticSearchOutput {

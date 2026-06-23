@@ -126,3 +126,13 @@ export function resolveTargetClient(clientId?: string): RobloxClient | null {
   if (wsCl.length > 0) return wsCl[wsCl.length - 1]!;
   return active.sort((a, b) => b.lastHttpPoll - a.lastHttpPoll)[0]!;
 }
+
+// Garbage collection for inactive HTTP polling clients to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [clientId, client] of clientRegistry.entries()) {
+    if (client.transport === "http" && now - client.lastHttpPoll > 60000) {
+      unregisterClient(clientId);
+    }
+  }
+}, 30000);

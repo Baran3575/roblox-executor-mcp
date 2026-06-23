@@ -21,6 +21,7 @@ Use it to see connected Roblox clients, inspect scripts, run tools, view server 
 - **Code Execution** — Run Lua code and fetch data from the game client.
 - **Script Inspection** — Decompile scripts and search across all sources.
 - **Instance Search** — CSS-like selectors and hierarchy trees.
+- **Instance Properties** — Retrieve all properties and attributes of Roblox instances.
 - **Remote Spy** — Intercept, log, block, and ignore Remotes/Bindables via [Cobalt](https://github.com/notpoiu/cobalt).
 - **GUI Interaction** — Click buttons and type into text boxes.
 - **Screenshot** — Capture Roblox window screenshots (Windows only).

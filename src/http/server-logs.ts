@@ -39,7 +39,14 @@ function classifyLevel(args: unknown[]): ServerLogEntry["level"] {
 
 function pushLog(level: ServerLogEntry["level"], args: unknown[]): void {
   const message = args
-    .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+    .map((a) => {
+      if (typeof a === "string") return a;
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return String(a);
+      }
+    })
     .join(" ");
   logBuffer.unshift({
     timestamp: new Date().toISOString(),

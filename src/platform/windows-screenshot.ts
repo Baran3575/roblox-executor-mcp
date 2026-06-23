@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -74,7 +75,7 @@ if ($found.Count -eq 0) {
 }
 `;
 
-  const tmpFile = path.join(os.tmpdir(), `roblox_enum_${Date.now()}.ps1`);
+  const tmpFile = path.join(os.tmpdir(), `roblox_enum_${crypto.randomUUID()}.ps1`);
   try {
     fs.writeFileSync(tmpFile, ps, "utf-8");
     const raw = execSync(
@@ -97,7 +98,7 @@ function captureWindowPNG(
   maxWidth: number = DEFAULT_SCREENSHOT_MAX_WIDTH,
   jpegQuality: number = DEFAULT_SCREENSHOT_JPEG_QUALITY
 ): string {
-  const outFile = path.join(os.tmpdir(), `roblox_screenshot_${Date.now()}.b64`);
+  const outFile = path.join(os.tmpdir(), `roblox_screenshot_${crypto.randomUUID()}.b64`);
   const safeMaxWidth = Math.max(320, Math.min(Math.floor(maxWidth) || DEFAULT_SCREENSHOT_MAX_WIDTH, 3840));
   const safeQuality = Math.max(30, Math.min(Math.floor(jpegQuality) || DEFAULT_SCREENSHOT_JPEG_QUALITY, 95));
   const ps = `
@@ -167,11 +168,11 @@ $final.Dispose()
 $bytes = $ms.ToArray()
 $ms.Dispose()
 $b64 = [Convert]::ToBase64String($bytes)
-[System.IO.File]::WriteAllText('${outFile.replace(/\\/g, "\\\\")}', $b64)
+[System.IO.File]::WriteAllText('${outFile.replace(/\\/g, "\\\\").replace(/'/g, "''")}', $b64)
 Write-Output 'OK'
 `;
 
-  const tmpFile = path.join(os.tmpdir(), `roblox_capture_${Date.now()}.ps1`);
+  const tmpFile = path.join(os.tmpdir(), `roblox_capture_${crypto.randomUUID()}.ps1`);
   try {
     fs.writeFileSync(tmpFile, ps, "utf-8");
     execSync(

@@ -14,21 +14,45 @@ local BridgeURL = getgenv().BridgeURL or ... or "localhost:16384"
 -- character table string
 local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
+local function native_base64_encode(data)
+    local crypt = getgenv().crypt or getgenv().syn and getgenv().syn.crypt
+    if crypt and crypt.base64encode then return crypt.base64encode(data) end
+    if crypt and crypt.base64 and crypt.base64.encode then return crypt.base64.encode(data) end
+    local base64 = getgenv().base64
+    if base64 and base64.encode then return base64.encode(data) end
+    return nil
+end
+
 -- encoding
 function base64_encode(data)
-    return ((data:gsub('.', function(x) 
-        local r,b='',x:byte()
-        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
-        return r;
-    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if (#x < 6) then return '' end
-        local c=0
-        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
-        return b:sub(c+1,c+1)
-    end)..({ '', '==', '=' })[#data%3+1])
+    local native = native_base64_encode(data)
+    if native then return native end
+
+    local len = #data
+    local t = {}
+    for i = 1, len, 3 do
+        local a1, a2, a3 = data:byte(i, i + 2)
+        a2 = a2 or 0
+        a3 = a3 or 0
+        local n = a1 * 65536 + a2 * 256 + a3
+        local c1 = math.floor(n / 262144) % 64 + 1
+        local c2 = math.floor(n / 4096) % 64 + 1
+        local c3 = math.floor(n / 64) % 64 + 1
+        local c4 = n % 64 + 1
+        table.insert(t, b:sub(c1, c1) .. b:sub(c2, c2) .. (#data - i >= 1 and b:sub(c3, c3) or "=") .. (#data - i >= 2 and b:sub(c4, c4) or "="))
+    end
+    return table.concat(t)
 end
 
 --// Functions \\--
+local function safeLoadstring(source, chunkname)
+    local fn, err = loadstring(source, chunkname)
+    if not fn then
+        error(tostring(err or "Unknown compilation error"))
+    end
+    return fn
+end
+
 local function CreateDecompileFunction(id, options)
     local Endpoint = options.Endpoint
     local EncodingCallback = options.EncodeBytecode or function(x) return x end
@@ -62,7 +86,7 @@ local function CreateDecompileFunction(id, options)
     end
 end
 
-local LuaEncode = loadstring(game:HttpGet("https://raw.githubusercontent.com/chadhyatt/LuaEncode/refs/heads/master/src/LuaEncode.lua"))()
+local LuaEncode = safeLoadstring(game:HttpGet("https://raw.githubusercontent.com/chadhyatt/LuaEncode/refs/heads/master/src/LuaEncode.lua"), "LuaEncode")()
 local cloneref = cloneref or function(x) return x end
 
 --// Bounded serialization: cap depth / entries / string length and render
@@ -373,25 +397,24 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
         --// Send registration \\--
         self.WebSocket:Send(HttpService:JSONEncode(GetRegistrationInfo()))
 
+        self.LastMessageTime = os.clock()
+
         self.AliveThread = task.spawn(function()
-            local consecutiveFailures = 0
-            while task.wait(1) do
+            while self.Connected do
+                task.wait(3)
                 if not self.Connected then
-                    continue
+                    break
                 end
 
-                if self:IsAlive() then
-                    consecutiveFailures = 0
-                    continue
+                local timeSinceLastMessage = os.clock() - self.LastMessageTime
+                if timeSinceLastMessage > 12 then
+                    self.Connected = false
+                    break
+                elseif timeSinceLastMessage > 6 then
+                    pcall(function()
+                        self.WebSocket:Send(HttpService:JSONEncode({ type = "ping" }))
+                    end)
                 end
-
-                consecutiveFailures += 1
-                if consecutiveFailures < 3 then
-                    continue
-                end
-                
-                self.Connected = false
-                break
             end
     
             pcall(function()
@@ -401,7 +424,14 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
     
         --// On Message \\--
         self.WebSocket.OnMessage:Connect(function(message)
-            local data = HttpService:JSONDecode(message)
+            self.LastMessageTime = os.clock()
+            local ok, data = pcall(function()
+                return HttpService:JSONDecode(message)
+            end)
+            if not ok or type(data) ~= "table" then
+                warn("Failed to decode WS message: " .. tostring(message))
+                return
+            end
 
             --// Handle registration response \\--
             if data.type == "registered" then
@@ -409,9 +439,15 @@ local WebSocketBridge = setmetatable({}, {__index = BaseBridge}); do
                 return
             end
 
+            if data.type == "pong" then
+                return
+            end
+
             local response = self:HandleMessage(data)
             if response then
-                self.WebSocket:Send(HttpService:JSONEncode(response))
+                pcall(function()
+                    self.WebSocket:Send(HttpService:JSONEncode(response))
+                end)
             end
         end)
     
@@ -466,8 +502,12 @@ local HTTPBridge = setmetatable({}, {__index = BaseBridge}); do
                 Body = HttpService:JSONEncode(GetRegistrationInfo()),
             })
             if regResponse.StatusCode == 200 and regResponse.Body then
-                local regData = HttpService:JSONDecode(regResponse.Body)
-                self.ClientId = regData.clientId
+                local ok, regData = pcall(function()
+                    return HttpService:JSONDecode(regResponse.Body)
+                end)
+                if ok and regData and regData.clientId then
+                    self.ClientId = regData.clientId
+                end
             end
         end)
     
@@ -501,11 +541,15 @@ local HTTPBridge = setmetatable({}, {__index = BaseBridge}); do
     
                     --// Handle response \\--
                     if response.Body and response.Body ~= "" then
-                        local data = HttpService:JSONDecode(response.Body)
+                        local ok, data = pcall(function()
+                            return HttpService:JSONDecode(response.Body)
+                        end)
+                        if not ok or typeof(data) ~= "table" then return end
+
                         local commands = {}
-                        if typeof(data) == "table" and data.type == nil and #data > 0 then
+                        if data.type == nil and #data > 0 then
                             commands = data
-                        elseif typeof(data) == "table" and data.type ~= nil then
+                        elseif data.type ~= nil then
                             commands = { data }
                         end
 
@@ -516,14 +560,16 @@ local HTTPBridge = setmetatable({}, {__index = BaseBridge}); do
                                 if result == nil then return end
 
                                 --// Send response back \\--
-                                request({
-                                    Url = "http://" .. BridgeURL .. "/respond",
-                                    Method = "POST",
-                                    Headers = {
-                                        ["Content-Type"] = "application/json"
-                                    },
-                                    Body = HttpService:JSONEncode(result)
-                                })
+                                pcall(function()
+                                    request({
+                                        Url = "http://" .. BridgeURL .. "/respond",
+                                        Method = "POST",
+                                        Headers = {
+                                            ["Content-Type"] = "application/json"
+                                        },
+                                        Body = HttpService:JSONEncode(result)
+                                    })
+                                end)
                             end)
                         end
                     end
@@ -716,20 +762,31 @@ local function UploadScriptSourceBatch(clientId, scripts, hasFinishedMapping)
     if not clientId then return false end
     if not IsScriptMappingTransportReady(clientId) then return false end
 
+    local payload = {
+        type = "script-sources",
+        clientId = clientId,
+        scripts = scripts or {},
+        hasFinishedMapping = hasFinishedMapping,
+        sourcesToMap = SourcesToMap,
+        processedSources = SourcesProcessed,
+        skippedSources = math.max(0, SourcesProcessed - MappedSources),
+    }
+
+    -- Use WebSocket if available to bypass HTTP connection overhead
+    if ActiveBridge and ActiveBridge.WebSocket and typeof(ActiveBridge.WebSocket.Send) == "function" then
+        local sendSuccess = pcall(function()
+            ActiveBridge.WebSocket:Send(HttpService:JSONEncode(payload))
+        end)
+        return sendSuccess
+    end
+
     local ok, response = pcall(request, {
         Url = "http://" .. BridgeURL .. "/script-sources",
         Method = "POST",
         Headers = {
             ["Content-Type"] = "application/json"
         },
-        Body = HttpService:JSONEncode({
-            clientId = clientId,
-            scripts = scripts or {},
-            hasFinishedMapping = hasFinishedMapping,
-            sourcesToMap = SourcesToMap,
-            processedSources = SourcesProcessed,
-            skippedSources = math.max(0, SourcesProcessed - MappedSources),
-        })
+        Body = HttpService:JSONEncode(payload)
     })
 
     return ok and response and response.StatusCode == 200
@@ -879,15 +936,27 @@ local function MapScriptSource(script)
     })
 end
 
-MappedSourceLimiter = Ratelimiter.new({
-    Burst = {
-        Time = 0.5,
-        Max = 4,
-    },
+local DecompileQueue = {}
+local ActiveDecompiles = 0
+local MaxDecompileConcurrency = 3
 
-    MainCallback = MapScriptSource
-})
-MappedSourceLimiter:SetupManagerThread()
+local function ProcessDecompileQueue()
+    if not IsScriptMappingTransportReady(ScriptSourceUploadClientId) then return end
+    while #DecompileQueue > 0 and ActiveDecompiles < MaxDecompileConcurrency do
+        local script = table.remove(DecompileQueue, 1)
+        if script then
+            ActiveDecompiles += 1
+            task.spawn(function()
+                pcall(MapScriptSource, script)
+                ActiveDecompiles -= 1
+                task.spawn(ProcessDecompileQueue)
+            end)
+        end
+    end
+    if #DecompileQueue == 0 and ActiveDecompiles == 0 and SourcesProcessed >= SourcesToMap then
+        PublishScriptMappingStatus(true)
+    end
+end
 
 local function GetScriptByDebugId(debugId)
     local CachedInstance = ScriptInstanceMap[debugId]
@@ -956,7 +1025,8 @@ local function QueueScriptForMapping(script)
     SourcesToMap += 1
     ScriptMappingFinished = false
     PublishScriptMappingStatus(false)
-    MappedSourceLimiter:QueueOperation(script)
+    table.insert(DecompileQueue, script)
+    task.spawn(ProcessDecompileQueue)
 end
 
 local function StartScriptMapping(clientId)
@@ -999,7 +1069,7 @@ local function StartScriptMapping(clientId)
         PublishScriptMappingStatus(false)
 
         for idx, scriptObject in ValidScripts do
-            task.defer(MappedSourceLimiter.QueueOperation, MappedSourceLimiter, scriptObject)
+            QueueScriptForMapping(scriptObject)
             if idx % 250 == 0 then task.wait(0.1) end
         end
 
@@ -1024,9 +1094,8 @@ local function ResetScriptMappingState(clientId)
         ScriptDescendantAddedConnection = nil
     end
 
-    if MappedSourceLimiter then
-        MappedSourceLimiter:SetupManagerThread()
-    end
+    table.clear(DecompileQueue)
+    ActiveDecompiles = 0
 
     table.clear(UploadQueue)
     table.clear(UploadQueueDebugIds)
@@ -1077,7 +1146,7 @@ while true do
     Bridge:BindToType("execute", function(data)
         task.defer(function()
             setthreadidentity(8)
-            loadstring(data.source)()
+            safeLoadstring(data.source, "execute")()
         end)
     end)
 
@@ -1157,7 +1226,7 @@ while true do
 
     Bridge:BindToType("get-data-by-code", function(data)
         setthreadidentity(8)
-        local dataOutput = table.pack(loadstring(data.source)())
+        local dataOutput = table.pack(safeLoadstring(data.source, "get-data-by-code")())
 
         return dataOutput
     end)
@@ -1172,7 +1241,7 @@ while true do
             assert(scriptInstance, "No live script instance found for ScriptProxy with DebugId: " .. tostring(data.debugId))
         else
             setthreadidentity(8)
-            scriptInstance = loadstring(data.source)()
+            scriptInstance = safeLoadstring(data.source, "get-script-content")()
 
             assert(typeof(scriptInstance) == "Instance", "Script instance is not an instance.")
             assert(scriptInstance:IsA("LuaSourceContainer"), "Script instance is not a LuaSourceContainer (Script, LocalScript, or ModuleScript).")
@@ -1232,7 +1301,7 @@ while true do
     end)
 
     Bridge:BindToType("search-instances", function(data)
-        local rootInstance = loadstring("return " .. data.root)()
+        local rootInstance = safeLoadstring("return " .. data.root, "search-instances")()
         local instances = rootInstance:QueryDescendants(data.selector)
         
         local limit = math.max(1, math.min(tonumber(data.limit) or 20, 100))
@@ -1284,7 +1353,7 @@ while true do
     end)
 
     Bridge:BindToType("get-descendants-tree", function(data)
-        local rootInstance = loadstring("return " .. data.root)()
+        local rootInstance = safeLoadstring("return " .. data.root, "get-descendants-tree")()
         assert(typeof(rootInstance) == "Instance", "Root path did not resolve to a valid Instance.")
 
         local maxDepth = math.max(0, math.min(tonumber(data.maxDepth) or 2, 5))
@@ -1399,6 +1468,243 @@ while true do
         return tree
     end)
 
+    local classProperties = {
+        Instance = {
+            "Name", "ClassName", "Parent", "Archivable"
+        },
+        BasePart = {
+            "Anchored", "CanCollide", "CanTouch", "CanQuery", "Size", "Position", "Orientation",
+            "CFrame", "Color", "Material", "Transparency", "Reflectance", "CastShadow", "Massless"
+        },
+        Humanoid = {
+            "Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight", "UseJumpPower",
+            "PlatformStand", "Sit", "DisplayName", "RigType"
+        },
+        Player = {
+            "Name", "UserId", "DisplayName", "TeamColor", "Neutral", "RespawnTime"
+        },
+        ValueObject = {
+            "Value"
+        },
+        GuiObject = {
+            "Visible", "Position", "Size", "AbsolutePosition", "AbsoluteSize", "AnchorPoint",
+            "BackgroundColor3", "BackgroundTransparency", "BorderSizePixel", "ZIndex"
+        },
+        TextLabel = {
+            "Text", "TextColor3", "TextSize", "Font", "TextScaled", "TextWrapped"
+        },
+        TextButton = {
+            "Text", "TextColor3", "TextSize", "Font", "TextScaled", "TextWrapped"
+        },
+        TextBox = {
+            "Text", "TextColor3", "TextSize", "Font", "TextScaled", "TextWrapped"
+        },
+        ImageLabel = {
+            "Image", "ImageColor3", "ImageTransparency"
+        },
+        ImageButton = {
+            "Image", "ImageColor3", "ImageTransparency"
+        },
+        Attachment = {
+            "Position", "Orientation", "CFrame", "Visible"
+        },
+        Beam = {
+            "Enabled", "Texture", "TextureMode", "TextureLength", "TextureSpeed", "Color", "Transparency", "Width0", "Width1"
+        },
+        Light = {
+            "Enabled", "Color", "Brightness", "Range", "Shadows"
+        },
+        SpotLight = {
+            "Angle", "Face"
+        },
+        SurfaceLight = {
+            "Angle", "Face"
+        },
+        Sound = {
+            "SoundId", "Playing", "Looped", "Volume", "PlaybackSpeed", "TimePosition"
+        },
+        ParticleEmitter = {
+            "Enabled", "Rate", "Lifetime", "Speed", "SpreadAngle", "Size", "Color", "Transparency"
+        },
+        Script = {
+            "Disabled"
+        },
+        LocalScript = {
+            "Disabled"
+        },
+        ModuleScript = {}
+    }
+
+    local function getFallbackProperties(instance)
+        local propertiesSet = {}
+        for _, prop in classProperties.Instance do
+            propertiesSet[prop] = true
+        end
+
+        if instance:IsA("BasePart") then
+            for _, prop in classProperties.BasePart do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Humanoid") then
+            for _, prop in classProperties.Humanoid do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Player") then
+            for _, prop in classProperties.Player do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("ValueObject") or instance.ClassName:find("Value$") then
+            for _, prop in classProperties.ValueObject do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("GuiObject") then
+            for _, prop in classProperties.GuiObject do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+            for _, prop in classProperties.TextLabel do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+            for _, prop in classProperties.ImageLabel do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Attachment") then
+            for _, prop in classProperties.Attachment do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Beam") then
+            for _, prop in classProperties.Beam do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Light") then
+            for _, prop in classProperties.Light do
+                propertiesSet[prop] = true
+            end
+            if instance:IsA("SpotLight") then
+                for _, prop in classProperties.SpotLight do
+                    propertiesSet[prop] = true
+                end
+            end
+            if instance:IsA("SurfaceLight") then
+                for _, prop in classProperties.SurfaceLight do
+                    propertiesSet[prop] = true
+                end
+            end
+        end
+        if instance:IsA("Sound") then
+            for _, prop in classProperties.Sound do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("ParticleEmitter") then
+            for _, prop in classProperties.ParticleEmitter do
+                propertiesSet[prop] = true
+            end
+        end
+        if instance:IsA("Script") or instance:IsA("LocalScript") then
+            for _, prop in classProperties.Script do
+                propertiesSet[prop] = true
+            end
+        end
+        
+        local list = {}
+        for prop in propertiesSet do
+            table.insert(list, prop)
+        end
+        return list
+    end
+
+    Bridge:BindToType("get-instance-properties", function(data)
+        local rootInstance = safeLoadstring("return " .. data.root, "get-instance-properties")()
+        assert(typeof(rootInstance) == "Instance", "Root path did not resolve to a valid Instance.")
+
+        local propertiesList = {}
+        local propertiesSet = {}
+
+        local getproperties = getproperties or get_properties
+        if typeof(getproperties) == "function" then
+            pcall(function()
+                local props = getproperties(rootInstance)
+                if typeof(props) == "table" then
+                    for _, prop in props do
+                        if typeof(prop) == "string" and not propertiesSet[prop] then
+                            propertiesSet[prop] = true
+                            table.insert(propertiesList, prop)
+                        end
+                    end
+                elseif typeof(props) == "table" then
+                    for prop, _ in props do
+                        if typeof(prop) == "string" and not propertiesSet[prop] then
+                            propertiesSet[prop] = true
+                            table.insert(propertiesList, prop)
+                        end
+                    end
+                end
+            end)
+        end
+
+        local gethiddenproperties = gethiddenproperties or get_hidden_properties
+        if typeof(gethiddenproperties) == "function" then
+            pcall(function()
+                local props = gethiddenproperties(rootInstance)
+                if typeof(props) == "table" then
+                    for _, prop in props do
+                        if typeof(prop) == "string" and not propertiesSet[prop] then
+                            propertiesSet[prop] = true
+                            table.insert(propertiesList, prop)
+                        end
+                    end
+                elseif typeof(props) == "table" then
+                    for prop, _ in props do
+                        if typeof(prop) == "string" and not propertiesSet[prop] then
+                            propertiesSet[prop] = true
+                            table.insert(propertiesList, prop)
+                        end
+                    end
+                end
+            end)
+        end
+
+        for _, prop in getFallbackProperties(rootInstance) do
+            if not propertiesSet[prop] then
+                propertiesSet[prop] = true
+                table.insert(propertiesList, prop)
+            end
+        end
+
+        local result = {}
+        for _, prop in propertiesList do
+            local ok, value = pcall(function()
+                return rootInstance[prop]
+            end)
+            if ok then
+                result[prop] = value
+            end
+        end
+
+        local attributes = {}
+        pcall(function()
+            attributes = rootInstance:GetAttributes()
+        end)
+        
+        return {
+            ClassName = rootInstance.ClassName,
+            Name = rootInstance.Name,
+            Properties = result,
+            Attributes = attributes
+        }
+    end)
+
     Bridge:BindToType("ensure-remote-spy", function(data)
         if getgenv().Cobalt then
             return {
@@ -1409,7 +1715,7 @@ while true do
 
         -- Load Cobalt
         local success, err = pcall(function()
-            loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
+            safeLoadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"), "Cobalt")()
         end)
 
         if not success then
@@ -1620,7 +1926,7 @@ while true do
 
         local textBox
         if typeof(path) == "string" then
-            textBox = loadstring("return " .. path)()
+            textBox = safeLoadstring("return " .. path, "type-text-box")()
         else
             textBox = path
         end
@@ -1689,7 +1995,7 @@ while true do
 
         local button
         if typeof(path) == "string" then
-            button = loadstring("return " .. path)()
+            button = safeLoadstring("return " .. path, "click-button")()
         else
             button = path
         end

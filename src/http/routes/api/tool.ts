@@ -359,6 +359,7 @@ export async function POST(req: IncomingMessage, res: ServerResponse): Promise<v
       "get-console-output": "get-console-output",
       "get-descendants-tree": "get-descendants-tree",
       "get-game-info": "get-game-info",
+      "get-instance-properties": "get-instance-properties",
     };
 
     const robloxType = dispatchTypes[type];
@@ -417,6 +418,10 @@ export async function POST(req: IncomingMessage, res: ServerResponse): Promise<v
       if (typeof params.summaryOnly === "boolean") data.summaryOnly = params.summaryOnly;
     } else if (type === "get-game-info") {
       data.includeDescription = params.includeDescription === true;
+    } else if (type === "get-instance-properties") {
+      const root = params.root as string;
+      if (!root) return jsonErr(res, "Missing 'root' parameter.");
+      data.root = root;
     }
 
     const callId = SendArbitraryDataToClient(robloxType, data, undefined, target.clientId);

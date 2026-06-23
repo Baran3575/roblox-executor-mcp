@@ -49,6 +49,9 @@ async function ensureLoaded(): Promise<void> {
   }
 }
 
+let writePromise: Promise<void> | null = null;
+let needsWrite = false;
+
 async function writeCache(): Promise<void> {
   await fs.mkdir(SEMANTIC_CONFIG_DIR, { recursive: true });
   const payload: PersistedEmbeddingCache = {
@@ -59,6 +62,23 @@ async function writeCache(): Promise<void> {
   await fs.writeFile(tmpPath, JSON.stringify(payload), { mode: 0o600 });
   await fs.rename(tmpPath, SEMANTIC_EMBEDDINGS_PATH);
   await fs.chmod(SEMANTIC_EMBEDDINGS_PATH, 0o600).catch(() => undefined);
+}
+
+async function scheduleWrite(): Promise<void> {
+  if (writePromise) {
+    needsWrite = true;
+    return;
+  }
+
+  writePromise = new Promise((resolve) => setTimeout(resolve, 1000))
+    .then(() => writeCache())
+    .then(() => {
+      writePromise = null;
+      if (needsWrite) {
+        needsWrite = false;
+        void scheduleWrite();
+      }
+    });
 }
 
 export async function readPersistedEmbedding(key: string): Promise<number[] | undefined> {
@@ -76,7 +96,17 @@ export async function writePersistedEmbeddings(
   for (const vector of vectors) {
     entries.set(vector.key, { embedding: vector.embedding, updatedAt });
   }
-  await writeCache();
+  void scheduleWrite();
+}
+
+export async function flushEmbeddingCache(): Promise<void> {
+  if (writePromise) {
+    needsWrite = true;
+    await writePromise;
+  } else if (needsWrite) {
+    needsWrite = false;
+    await writeCache();
+  }
 }
 
 export async function clearPersistedEmbeddings(): Promise<void> {

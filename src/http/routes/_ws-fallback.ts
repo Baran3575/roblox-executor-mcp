@@ -2,9 +2,11 @@ import type { WebSocket } from "ws";
 import { handleRobloxResponse } from "../../bridge/handlers/shared/communication.js";
 import {
   getClientIdByWs,
+  getClientById,
   registerClient,
   unregisterClient,
 } from "../../bridge/handlers/shared/registry.js";
+import { upsertScriptSources } from "../../bridge/handlers/shared/script-source-store.js";
 import type { RobloxResponse } from "../../bridge/types.js";
 
 interface RegisterMessage {
@@ -21,9 +23,14 @@ export function WS(ws: WebSocket): void {
 
   ws.on("message", (rawData) => {
     try {
-      const data = JSON.parse(rawData.toString()) as RegisterMessage | RobloxResponse;
+      const data = JSON.parse(rawData.toString()) as any;
 
-      if ((data as RegisterMessage).type === "register") {
+      if (data.type === "ping") {
+        ws.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+
+      if (data.type === "register") {
         const info = data as RegisterMessage;
         const clientId = registerClient({
           username: info.username || "Unknown",
@@ -35,6 +42,22 @@ export function WS(ws: WebSocket): void {
           ws,
         });
         ws.send(JSON.stringify({ type: "registered", clientId }));
+        return;
+      }
+
+      if (data.type === "script-sources") {
+        const clientId = getClientIdByWs(ws);
+        const client = clientId ? getClientById(clientId) : undefined;
+        if (client) {
+          upsertScriptSources(
+            {
+              clientId: client.clientId,
+              placeId: client.placeId,
+              jobId: client.jobId,
+            },
+            data
+          );
+        }
         return;
       }
 
